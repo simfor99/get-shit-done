@@ -772,3 +772,503 @@ I'll apply it to the auth routes. This will also require updating
 The MCP server doesn't replace hooks—it complements them:
 - **Hooks:** Capture data automatically (reactive)
 - **MCP:** Query data on demand (interactive)
+
+---
+
+## PART 2: REVISED PERSPECTIVE (After Deep System Analysis)
+
+**Updated:** 2025-01-21
+**Context:** After comprehensive analysis of the full GSD system (commands, agents, workflows, hooks, templates)
+
+---
+
+## Critical Realization: MCP Serves the Agent System
+
+The initial MCP proposal focused on ad-hoc queries during coding. But GSD is **agent-orchestrated** — the real consumers of MCP tools are:
+
+1. **gsd-planner** - Creates executable plans
+2. **gsd-executor** - Executes tasks with fresh context
+3. **gsd-verifier** - Validates phase goals achieved
+4. **gsd-phase-researcher** - Researches implementation approaches
+
+These agents would gain **massive** capabilities from MCP tools.
+
+---
+
+## How GSD Currently Works (The Full Picture)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         GSD ORCHESTRATION SYSTEM                         │
+│                                                                          │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐ │
+│  │  Commands   │──▶│  Workflows  │──▶│   Agents    │──▶│   Hooks     │ │
+│  │             │   │             │   │             │   │             │ │
+│  │ /gsd:plan   │   │ plan-phase  │   │ gsd-planner │   │ intel-index │ │
+│  │ /gsd:exec   │   │ exec-phase  │   │ gsd-executor│   │ intel-session│ │
+│  │ /gsd:verify │   │ verify-phase│   │ gsd-verifier│   │ intel-prune │ │
+│  └─────────────┘   └─────────────┘   └─────────────┘   └─────────────┘ │
+│         │                 │                 │                 │         │
+│         ▼                 ▼                 ▼                 ▼         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                        .planning/ BRAIN                           │  │
+│  │                                                                   │  │
+│  │  PROJECT.md │ REQUIREMENTS.md │ ROADMAP.md │ STATE.md │ intel/   │  │
+│  │  (vision)   │ (what to build) │ (phases)   │ (now)    │ (learn)  │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### What Each Agent Currently Receives
+
+| Agent | Context Loaded | What's Missing |
+|-------|----------------|----------------|
+| **gsd-planner** | PROJECT.md, ROADMAP.md, phase CONTEXT.md, intel summary | Can't query "how did we handle X before?" |
+| **gsd-executor** | PROJECT.md, ROADMAP.md, STATE.md, PLAN.md, intel summary | Can't check blast radius before editing |
+| **gsd-verifier** | PLAN.md must_haves, source files | Can't query "is behavior X implemented?" |
+| **gsd-researcher** | Web search, file reads | Can't query "what patterns exist in our codebase?" |
+
+### The Gap: Static Loading vs Dynamic Queries
+
+**Current:** Agents load fixed context at spawn time. If they need different info mid-task, they must read raw files.
+
+**With MCP:** Agents query exactly what they need, when they need it. Fresh, relevant, structured.
+
+---
+
+## MCP Tools Designed for GSD Agents
+
+### For gsd-planner: "What Should I Plan?"
+
+```typescript
+// Before creating a plan, planner queries:
+
+gsd_phase_relevant_files({
+  phase_goal: "Add rate limiting to authentication",
+  include_purposes: true,
+  include_blast_radius: true
+})
+
+// Returns:
+{
+  relevant_files: [
+    {
+      path: "src/services/auth.service.ts",
+      purpose: "JWT auth, session management",
+      blast_radius: 28,
+      recommendation: "Core auth logic - add rate limit here"
+    },
+    {
+      path: "src/middleware/rate-limit.ts",
+      purpose: "Express rate limiting (currently unused)",
+      blast_radius: 0,
+      recommendation: "Existing middleware - wire into auth routes"
+    }
+  ],
+  suggested_approach: "Use existing rate-limit.ts middleware, apply to auth routes",
+  patterns_from_codebase: "Middleware applied in route files, not services"
+}
+
+// Planner creates better plans with this intelligence
+```
+
+### For gsd-executor: "What Will Break?"
+
+```typescript
+// Before editing a file, executor queries:
+
+gsd_pre_edit_check({
+  file: "src/lib/db.ts",
+  planned_change: "Add timeout parameter to query()",
+  change_type: "signature_change"
+})
+
+// Returns:
+{
+  safe: false,
+  blast_radius: 42,
+  breaking_files: [
+    "src/services/user.service.ts",
+    "src/services/auth.service.ts",
+    // ... 40 more
+  ],
+  recommendation: "Make timeout optional with default value",
+  example: "query(sql, params, timeout = 30000)"
+}
+
+// Executor adjusts approach before writing code
+```
+
+### For gsd-verifier: "Is This Actually Done?"
+
+```typescript
+// Instead of manual file reads, verifier queries:
+
+gsd_verify_behavior({
+  must_have: "Users can log in with email/password",
+  check_type: "behavior"
+})
+
+// Returns:
+{
+  verified: true,
+  evidence: [
+    { file: "src/api/auth.ts", line: 45, code: "router.post('/login', ...)" },
+    { file: "src/services/auth.service.ts", line: 78, code: "validateCredentials()" },
+    { test: "src/__tests__/auth.test.ts", description: "should login with valid credentials" }
+  ],
+  confidence: "high"
+}
+
+gsd_verify_artifact({
+  must_exist: "Login API endpoint at /api/auth/login",
+  check_type: "artifact"
+})
+
+// Returns:
+{
+  exists: true,
+  location: "src/api/auth.ts:45",
+  method: "POST",
+  middleware: ["validateBody", "rateLimiter"]
+}
+```
+
+### For gsd-researcher: "How Does Our Codebase Do X?"
+
+```typescript
+// Before researching external solutions, check internal patterns:
+
+gsd_codebase_patterns({
+  query: "error handling in API routes",
+  include_examples: true
+})
+
+// Returns:
+{
+  patterns: [
+    {
+      name: "Try-catch with Result type",
+      frequency: "89% of API handlers",
+      example: {
+        file: "src/api/users.ts",
+        code: "try { ... } catch (e) { return Result.err(e) }"
+      }
+    }
+  ],
+  recommendation: "Follow existing Result type pattern"
+}
+```
+
+---
+
+## MCP Tools for Phase Workflow
+
+### Phase State Management
+
+```typescript
+gsd_phase_status()
+// Returns structured phase state (not requiring STATE.md parsing)
+{
+  current_phase: 3,
+  phase_name: "Authentication",
+  plans: [
+    { id: "03-01", status: "completed", tasks: 3 },
+    { id: "03-02", status: "in_progress", tasks: 2, current_task: 1 },
+    { id: "03-03", status: "pending", tasks: 2 }
+  ],
+  verification_status: "pending",
+  blockers: []
+}
+
+gsd_update_phase_state({
+  plan: "03-02",
+  task: 2,
+  status: "completed",
+  commit: "abc123"
+})
+// Updates STATE.md atomically
+```
+
+### Requirement Traceability
+
+```typescript
+gsd_requirement_status({
+  requirement_id: "AUTH-03"
+})
+
+// Returns:
+{
+  requirement: "Users can reset password via email",
+  status: "in_progress",
+  traced_to: [
+    { phase: 3, plan: "03-02", task: 2 }
+  ],
+  verification: {
+    status: "pending",
+    must_haves: [
+      "Reset email sends within 5 seconds",
+      "Token expires after 1 hour"
+    ]
+  }
+}
+
+gsd_untraceable_requirements()
+// Returns requirements not yet mapped to phases
+```
+
+### Cross-Phase Learning
+
+```typescript
+gsd_similar_past_work({
+  current_goal: "Add Stripe payment integration",
+  include_summaries: true
+})
+
+// Returns:
+{
+  similar_phases: [
+    {
+      phase: 2,
+      goal: "Add SendGrid email integration",
+      approach: "Service layer wrapper, webhook handler, config in env",
+      lessons: "Start with webhook handler - API calls are easy, webhooks are tricky",
+      files_created: ["src/services/email.service.ts", "src/api/webhooks/sendgrid.ts"]
+    }
+  ],
+  recommendation: "Follow email integration pattern: service wrapper + webhook handler"
+}
+```
+
+---
+
+## MCP Resources for Context Loading
+
+Instead of loading entire files, agents request specific resources:
+
+```typescript
+// Resource: gsd://project/vision
+// Returns: Just the vision/core-value section of PROJECT.md
+
+// Resource: gsd://requirements/pending
+// Returns: Only incomplete requirements
+
+// Resource: gsd://roadmap/current-phase
+// Returns: Just current phase details
+
+// Resource: gsd://intel/hotspots
+// Returns: Top 10 most-depended files with purposes
+
+// Resource: gsd://phase/{n}/context
+// Returns: User's preferences for phase N
+
+// Resource: gsd://phase/{n}/research
+// Returns: Research findings for phase N
+```
+
+**Benefit:** Agents load exactly what they need. Fresh 200k context used efficiently.
+
+---
+
+## MCP Prompts for Agent Spawning
+
+Pre-built prompts that combine resources intelligently:
+
+```typescript
+// Prompt: gsd://spawn/planner
+// Combines: vision + current phase goal + relevant intel + conventions
+// Optimized for: Creating executable plans
+
+// Prompt: gsd://spawn/executor
+// Combines: plan + relevant source files + blast radius info + conventions
+// Optimized for: Executing tasks without context waste
+
+// Prompt: gsd://spawn/verifier
+// Combines: must_haves + actual codebase state + test coverage
+// Optimized for: Goal-backward verification
+```
+
+---
+
+## Revised Architecture with MCP
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         GSD WITH MCP SERVER                              │
+│                                                                          │
+│  ┌─────────────┐                                                        │
+│  │  Commands   │                                                        │
+│  │             │                                                        │
+│  │ /gsd:plan   │──┐                                                     │
+│  │ /gsd:exec   │  │                                                     │
+│  │ /gsd:verify │  │                                                     │
+│  └─────────────┘  │                                                     │
+│                   │                                                     │
+│                   ▼                                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                         MCP SERVER                                │   │
+│  │                                                                   │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │   │
+│  │  │   Tools     │  │  Resources  │  │   Prompts   │              │   │
+│  │  │             │  │             │  │             │              │   │
+│  │  │ query_intel │  │ gsd://proj  │  │ spawn/plan  │              │   │
+│  │  │ blast_radius│  │ gsd://intel │  │ spawn/exec  │              │   │
+│  │  │ verify_goal │  │ gsd://phase │  │ spawn/verify│              │   │
+│  │  │ phase_state │  │ gsd://req   │  │             │              │   │
+│  │  │ learn_pattern│ │             │  │             │              │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
+│  │         │                │                │                       │   │
+│  │         └────────────────┼────────────────┘                       │   │
+│  │                          │                                        │   │
+│  │                          ▼                                        │   │
+│  │  ┌───────────────────────────────────────────────────────────┐   │   │
+│  │  │                    .planning/ BRAIN                        │   │   │
+│  │  │                                                            │   │   │
+│  │  │  PROJECT │ REQUIREMENTS │ ROADMAP │ STATE │ intel/ │ phases│   │   │
+│  │  └───────────────────────────────────────────────────────────┘   │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                   │                                                     │
+│                   ▼                                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                         AGENTS                                    │   │
+│  │                                                                   │   │
+│  │  gsd-planner ◀──── MCP Tools ────▶ gsd-executor                  │   │
+│  │       │                                   │                       │   │
+│  │       │         gsd-verifier ◀────────────┘                       │   │
+│  │       │              │                                            │   │
+│  │       └──────────────┼────────────────────────────────────────────│   │
+│  │                      ▼                                            │   │
+│  │              [Better decisions, less wasted context]              │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌─────────────┐                                                        │
+│  │   Hooks     │◀─── Still capture data automatically                   │
+│  │             │                                                        │
+│  │ intel-index │──── MCP server reads this data                         │
+│  │ intel-prune │                                                        │
+│  └─────────────┘                                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## What Changes with This Understanding
+
+### Original Proposal Focus:
+- Ad-hoc queries during coding
+- Duplicate detection
+- Convention checking
+- Learning from corrections
+
+### Revised Proposal Focus:
+- **Agent-level intelligence** - Planner, executor, verifier all use MCP
+- **Phase workflow integration** - State, requirements, traceability
+- **Cross-phase learning** - "How did we do X before?"
+- **Smart context loading** - Resources replace static file loads
+- **Verification acceleration** - Structured queries instead of file reads
+
+### New Priority Order:
+
+| Priority | Tool | Primary Consumer | Impact |
+|----------|------|------------------|--------|
+| P0 | `gsd_phase_relevant_files` | gsd-planner | Better plans from day 1 |
+| P0 | `gsd_pre_edit_check` | gsd-executor | Prevent breaking changes |
+| P0 | `gsd_verify_behavior` | gsd-verifier | Faster, more accurate verification |
+| P1 | `gsd_phase_status` | All agents | Structured state access |
+| P1 | `gsd_requirement_status` | gsd-verifier | Traceability queries |
+| P1 | `gsd_codebase_patterns` | gsd-planner | Learn from existing code |
+| P2 | `gsd_similar_past_work` | gsd-planner | Cross-phase learning |
+| P2 | `gsd_learn_correction` | All | Permanent preferences |
+| P3 | Resources (gsd://) | All agents | Efficient context loading |
+| P3 | Prompts | Orchestrators | Optimized agent spawning |
+
+---
+
+## The Deepest Insight
+
+**GSD's power comes from orchestration.** The phase loop (discuss → plan → execute → verify) is the core value.
+
+**MCP amplifies orchestration.** Each agent becomes smarter:
+- Planner creates plans knowing what code exists
+- Executor changes code knowing what will break
+- Verifier confirms goals knowing what to check
+
+**The intel system is the data layer.** MCP is the query layer. Hooks capture; MCP serves.
+
+**Result:** Not just "Claude can ask questions" but "GSD agents make better decisions at every step of the workflow."
+
+---
+
+## Implementation Implications
+
+### MCP Server Must Understand GSD Structure
+
+The server isn't generic — it's GSD-native:
+
+```typescript
+class GsdMcpServer {
+  private planningDir: string;  // .planning/
+  private intelDir: string;     // .planning/intel/
+  private phasesDir: string;    // .planning/phases/
+
+  // Reads structured GSD files
+  private readProjectMd(): ProjectData;
+  private readRequirementsMd(): Requirement[];
+  private readRoadmapMd(): Phase[];
+  private readStateMd(): CurrentState;
+
+  // Queries intel layer
+  private queryGraph(query: GraphQuery): GraphResult;
+  private getHotspots(limit: number): Hotspot[];
+  private getRelevantFiles(keywords: string[]): RelevantFile[];
+
+  // Phase-aware operations
+  private getCurrentPhase(): PhaseDetails;
+  private getPhaseContext(phaseNum: number): Context;
+  private getPlanMustHaves(planId: string): MustHave[];
+}
+```
+
+### Hooks Feed, MCP Serves
+
+```
+Write/Edit ──▶ gsd-intel-index.js ──▶ index.json, graph.db
+                                            │
+                                            ▼
+                                      MCP Server reads
+                                            │
+                                            ▼
+                              gsd_query_intel() returns structured data
+```
+
+Hooks remain reactive data capture. MCP becomes the intelligent query interface.
+
+### Agent Integration Points
+
+Each agent's prompt would include MCP tool availability:
+
+```markdown
+# gsd-planner agent
+
+You have access to these MCP tools:
+- `gsd_phase_relevant_files` - Find files relevant to phase goal
+- `gsd_codebase_patterns` - Discover existing patterns
+- `gsd_similar_past_work` - Learn from previous phases
+
+Use these tools BEFORE creating plans to ensure accuracy.
+```
+
+---
+
+## Conclusion: MCP is GSD's Brain Upgrade
+
+| Without MCP | With MCP |
+|-------------|----------|
+| Agents load static files | Agents query dynamically |
+| Plans based on generic intel | Plans based on relevant intel |
+| Executor doesn't know blast radius | Executor checks before editing |
+| Verifier reads files manually | Verifier queries structured data |
+| Each phase starts fresh | Phases learn from each other |
+| Context wasted on irrelevant data | Context used for relevant data |
+
+**GSD + MCP = Intelligent orchestration where every agent has full codebase awareness.**
