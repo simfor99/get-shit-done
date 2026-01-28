@@ -214,6 +214,17 @@ Enables instant resumption:
 
 This is the primary source of truth for session handoff.
 
+**⚠️ CRITICAL CONSTRAINT: Only ONE Session Continuity section allowed!**
+
+Multiple Session Continuity sections cause resume-work to read the FIRST (stale) one and ignore the current state. This has caused serious session handoff failures.
+
+**Rules:**
+- Session Continuity MUST be the LAST section in STATE.md
+- When updating, REPLACE the entire section (don't append a new one)
+- pause-work.md handles this by deleting from "## Session Continuity" to EOF before writing
+
+**Validation:** If you find multiple "## Session Continuity" headers, the file is corrupted. Delete all but the last one.
+
 </sections>
 
 <size_constraint>

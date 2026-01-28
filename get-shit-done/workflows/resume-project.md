@@ -36,6 +36,24 @@ ls .planning/PROJECT.md 2>/dev/null && echo "Project file exists"
 Read and parse STATE.md, PROJECT.md, and REQUIREMENTS.md:
 
 ```bash
+# CRITICAL: Check for corrupted STATE.md (multiple Session Continuity sections)
+CONTINUITY_COUNT=$(grep -c "^## Session Continuity" .planning/STATE.md 2>/dev/null || echo "0")
+if [ "$CONTINUITY_COUNT" -gt 1 ]; then
+  echo "⚠️ WARNING: STATE.md is corrupted - found $CONTINUITY_COUNT Session Continuity sections!"
+  echo "This causes resume-work to read stale data. Fixing automatically..."
+
+  # Keep only the LAST Session Continuity section
+  FIRST_LINE=$(grep -n "^## Session Continuity" .planning/STATE.md | head -1 | cut -d: -f1)
+  LAST_LINE=$(grep -n "^## Session Continuity" .planning/STATE.md | tail -1 | cut -d: -f1)
+
+  if [ "$FIRST_LINE" != "$LAST_LINE" ]; then
+    # Delete from first occurrence to line before last occurrence
+    BEFORE_LAST=$((LAST_LINE - 1))
+    sed -i "${FIRST_LINE},${BEFORE_LAST}d" .planning/STATE.md
+    echo "✓ Fixed: Removed duplicate Session Continuity sections"
+  fi
+fi
+
 cat .planning/STATE.md
 cat .planning/PROJECT.md
 cat .planning/REQUIREMENTS.md 2>/dev/null
@@ -86,12 +104,31 @@ if [ -f .planning/current-agent-id.txt ] && [ -s .planning/current-agent-id.txt 
   AGENT_ID=$(cat .planning/current-agent-id.txt | tr -d '\n')
   echo "Interrupted agent: $AGENT_ID"
 fi
+
+# CRITICAL: Check for UAT gaps (diagnosed status = BLOCKER!)
+for uat in .planning/phases/*/*-UAT.md; do
+  if [ -f "$uat" ]; then
+    UAT_STATUS=$(grep "^status:" "$uat" 2>/dev/null | head -1 | cut -d: -f2 | tr -d ' ')
+    if [ "$UAT_STATUS" = "diagnosed" ]; then
+      echo "UAT-BLOCKER: $uat (status: diagnosed)"
+      # Extract the gap details
+      grep -A 5 "^## Gaps" "$uat" 2>/dev/null | head -10
+    fi
+  fi
+done 2>/dev/null
 ```
+
+**🔴 PRIORITY 1 - If UAT with status: diagnosed exists:**
+
+- This is a **BLOCKER** - phase cannot proceed until fixed!
+- Read the UAT file's "Gaps" section for specific issues
+- Flag: "UAT gaps require fixing before proceeding"
+- **Action:** Fix the diagnosed issues first, then re-verify
 
 **If .continue-here file exists:**
 
 - This is a mid-plan resumption point
-- Read the file for specific resumption context
+- **CRITICAL: Read and display the file's `<next_action>` and `<blockers>` sections!**
 - Flag: "Found mid-plan checkpoint"
 
 **If PLAN without SUMMARY exists:**
@@ -122,9 +159,31 @@ Present complete project status to user:
 ║  Last activity: [date] - [what happened]                     ║
 ╚══════════════════════════════════════════════════════════════╝
 
-[If incomplete work found:]
-⚠️  Incomplete work detected:
-    - [.continue-here file or incomplete plan]
+[If UAT-BLOCKER found - SHOW FIRST!]
+🔴 UAT BLOCKER - Must fix before proceeding:
+    File: [UAT file path]
+    Status: diagnosed
+
+    Gap details:
+    - [truth]: [status: failed]
+    - [reason]: [why it failed]
+    - [severity]: [blocker/high/medium]
+
+    ⚠️ Fix this issue FIRST, then /gsd:verify-work to re-test
+
+[If .continue-here file found - SHOW CONTENT!]
+📌 Mid-plan checkpoint found:
+    File: [.continue-here file path]
+
+    ┌─ BLOCKERS ─────────────────────────────────────┐
+    │ [Read and display <blockers> section content]  │
+    └────────────────────────────────────────────────┘
+
+    ┌─ NEXT ACTION ──────────────────────────────────┐
+    │ [Read and display <next_action> section]       │
+    └────────────────────────────────────────────────┘
+
+    Resume from this checkpoint? (recommended)
 
 [If interrupted agent found:]
 ⚠️  Interrupted agent detected:
@@ -133,6 +192,12 @@ Present complete project status to user:
     Interrupted: [timestamp]
 
     Resume with: Task tool (resume parameter with agent ID)
+
+[If incomplete plan (PLAN without SUMMARY):]
+⚠️  Incomplete plan execution:
+    - [plan file] has no SUMMARY
+
+    Complete this plan or use /gsd:recover-summary
 
 [If pending todos exist:]
 📋 [N] pending todos — /gsd:check-todos to review
@@ -146,28 +211,58 @@ Present complete project status to user:
 ⚠️  Brief alignment: [status] - [assessment]
 ```
 
+**CRITICAL: Read .continue-here file content!**
+
+If a .continue-here file exists, you MUST:
+1. Read the entire file with `cat [path]`
+2. Extract and display the `<blockers>` section
+3. Extract and display the `<next_action>` section
+4. This is the PRIMARY context for resumption!
+
 </step>
 
 <step name="determine_next_action">
-Based on project state, determine the most logical next action:
+Based on project state, determine the most logical next action.
 
-**If interrupted agent exists:**
+**⚠️ PRIORITY HIERARCHY (follow this order!):**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  PRIORITY ORDER FOR RESUMPTION                              │
+├─────────────────────────────────────────────────────────────┤
+│  1. 🔴 UAT-BLOCKER (diagnosed)  →  MUST FIX FIRST          │
+│  2. 🟡 Interrupted agent         →  Resume agent            │
+│  3. 🟡 .continue-here checkpoint →  Resume from checkpoint  │
+│  4. 🟡 Incomplete plan           →  Complete plan           │
+│  5. 🟢 Phase complete            →  Transition to next      │
+│  6. 🟢 Ready to plan/execute     →  Normal workflow         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**🔴 PRIORITY 1 - If UAT with status: diagnosed exists:**
+→ **BLOCKER** - Cannot proceed to next phase!
+→ Primary: Fix the diagnosed issues (show specific gaps)
+→ After fix: Re-run /gsd:verify-work
+→ ⚠️ Do NOT offer "skip" or "proceed anyway" - this is a hard blocker
+
+**🟡 PRIORITY 2 - If interrupted agent exists:**
 → Primary: Resume interrupted agent (Task tool with resume parameter)
 → Option: Start fresh (abandon agent work)
 
-**If .continue-here file exists:**
-→ Primary: Resume from checkpoint
+**🟡 PRIORITY 3 - If .continue-here file exists:**
+→ Primary: Resume from checkpoint (show `<next_action>` content!)
 → Option: Start fresh on current plan
+→ **CRITICAL:** The .continue-here file contains the exact context needed!
 
-**If incomplete plan (PLAN without SUMMARY):**
+**🟡 PRIORITY 4 - If incomplete plan (PLAN without SUMMARY):**
 → Primary: Complete the incomplete plan
 → Option: Abandon and move on
 
-**If phase in progress, all plans complete:**
+**🟢 PRIORITY 5 - If phase in progress, all plans complete:**
 → Primary: Transition to next phase
 → Option: Review completed work
 
-**If phase ready to plan:**
+**🟢 PRIORITY 6 - If phase ready to plan:**
 → Check if CONTEXT.md exists for this phase:
 
 - If CONTEXT.md missing:
@@ -177,7 +272,7 @@ Based on project state, determine the most logical next action:
   → Primary: Plan the phase
   → Option: Review roadmap
 
-**If phase ready to execute:**
+**🟢 PRIORITY 7 - If phase ready to execute:**
 → Primary: Execute next plan
 → Option: Review the plan first
 </step>

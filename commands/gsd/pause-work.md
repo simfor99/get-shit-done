@@ -141,6 +141,7 @@ Be specific enough for a fresh Claude to understand immediately.
 ```bash
 CONTINUE_HERE_PATH="$CURRENT_PHASE_DIR/.continue-here.md"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+HUMAN_TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
 
 # Update last_checkpoint to point to the handoff file
 sed -i "s|^last_checkpoint:.*|last_checkpoint: $CONTINUE_HERE_PATH|" .planning/STATE.md
@@ -168,17 +169,37 @@ if [ -n "$CURRENT_PLAN" ]; then
 fi
 ```
 
-**Also update Session Continuity section:**
+**CRITICAL: REPLACE (not append!) Session Continuity section:**
 
-Update the prose section to match:
-```markdown
+⚠️ **This step caused session handoff failures when it APPENDED instead of REPLACED!**
+
+The Session Continuity section MUST be the LAST section in STATE.md and there must be ONLY ONE.
+
+```bash
+# CRITICAL: Remove ALL existing Session Continuity sections first!
+# This prevents duplicate sections that confuse resume-work
+
+# Find line number of FIRST "## Session Continuity" and delete from there to EOF
+CONTINUITY_LINE=$(grep -n "^## Session Continuity" .planning/STATE.md | head -1 | cut -d: -f1)
+
+if [ -n "$CONTINUITY_LINE" ]; then
+  # Delete from Session Continuity to end of file
+  sed -i "${CONTINUITY_LINE},\$d" .planning/STATE.md
+fi
+
+# Now append the NEW (and only!) Session Continuity section
+cat >> .planning/STATE.md << SESSION_EOF
+
 ## Session Continuity
 
-Last session: {TIMESTAMP}
+Last session: $HUMAN_TIMESTAMP
 Stopped at: Paused mid-execution via /gsd:pause-work
 Next step: /gsd:resume-work
-Resume file: {CONTINUE_HERE_PATH}
+Resume file: $CONTINUE_HERE_PATH
+SESSION_EOF
 ```
+
+**Why this matters:** If multiple Session Continuity sections exist, resume-work reads the FIRST (stale) one and ignores the current state!
 </step>
 
 <step name="commit">
